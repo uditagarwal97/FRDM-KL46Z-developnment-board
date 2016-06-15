@@ -1,0 +1,175 @@
+//code for sending a string via uart method from board to pc via open sda port
+#include "MKL46Z4.H"
+#include "string.h"
+# define len 40
+void sw1(){
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTC_MASK;
+	PORTC_PCR3=1u<<8|1u<<1|1u<<0;
+	GPIOC_PDDR=GPIOC_PDDR&~(1u<<8);
+}
+void sw2(){
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTC_MASK;
+	PORTC_PCR12=1u<<8|1u<<1|1u<<0;
+	GPIOC_PDDR=GPIOC_PDDR&~(1u<<8);
+}
+void green()
+{
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTD_MASK;
+	PORTD_PCR5=1u<<8;
+	GPIOD_PDDR=1u<<5;
+	GPIOD_PSOR=1u<<5;
+}
+void red()
+{
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTE_MASK;
+	PORTE_PCR29=1u<<8;
+	GPIOE_PDDR=1u<<29;
+	GPIOE_PSOR=1u<<29;
+}
+void redon()
+{
+	GPIOE_PCOR=1u<<29;
+}
+void greenon()
+{
+	GPIOD_PCOR=(1u<<5);
+}
+void greenoff()
+{
+	GPIOD_PSOR=1u<<5;
+}
+void redoff()
+{
+	GPIOE_PSOR=1u<<29;
+}
+int sw1stat()
+{
+	if(GPIOC_PDIR==4096||GPIOC_PDIR==0)
+	return 1;
+	else
+		return 0;
+}
+int sw2stat()
+{
+	if(GPIOC_PDIR==8||GPIOC_PDIR==0)
+		return 1;
+		else
+			return 0;
+}
+int getgreenstatus()                             //READ DATA FROM PORT DATA INPUT REGISTER OF GREEN LED
+{
+	if( GPIOD_PDIR==1u<<5)
+		return 0;
+	else
+		return 1;
+}
+int getredstatus()                             //READ DATA FROM PORT DATA INPUT REGISTER OF RED LED
+{
+	if( GPIOE_PDIR==1u<<29)
+		return 0;
+	else
+		return 1;
+}
+void UART_Init(void){
+	SIM_SOPT2=(1u<<26);//SIM_SOPT2_UART0SRC(1);Clock to UART0 MCGFLLCLK 20.97152MHz as MCG_C4=0x00 low range 20Mhz
+	//SIM_SOPT5=0x00;kar na kar
+	//open-drain mode disabled(Clear bit 16) plus
+	//connection to UART_TX and UART_RX(Module to module interconnect) Clear bit 2,1 and 0
+	SIM_SCGC4=SIM_SCGC4|(1u<<10);//set bit 10 for giving clock to UART0
+	SIM_SCGC5=SIM_SCGC5_PORTA_MASK;//set bit 9 for giving clock to PORTA
+	PORTA_PCR1=PORTA_PCR1&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA1 as UART1_RX (010  9 for alternative 2 which is UART0_RX)
+	PORTA_PCR2=PORTA_PCR1&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA2 as UART1_TX (010  9 for alternative 2 which is UART0_TX)
+	UART0_C2=0x00;//TX and RX both disabled
+    UART0_BDH=0x00;//0x02;//Baud rate =9600,20.97152Mhz clock
+    UART0_BDL=0x88;//BR=136//0x22;//BR=132.5=132=100111000
+    UART0_C1=0x00;
+    //UART0_S2=UART0_S1 & 0xC1;
+    UART0_C3=0x00;
+    UART0_C4=0x0F;//OSR=15//OSR=3
+    UART0_C5=0x00;//not both edges 0x02;//as OSR=4, sampling on both edges of baud rate clock of received data
+    UART0_C2=UART0_C2 | (1u<<3);//only TX enable
+    //UART0_C2=UART0_C2 | (1u<<2);//for RX pin to enable
+}
+
+void InitSYSTICK(void)
+{
+	//this is a 24 bit down counter
+	SysTick->CTRL=0;//disable timer
+	SysTick->LOAD=0x00FFFFFF;//load to full value 0x00FFFFFF
+	SysTick->VAL=0;//write anything to reset register
+	SysTick->CTRL=0x00000004;//1=bus clock, 0=disable interrupt, 0=disable systick
+}
+void delay(void)
+{
+	SysTick->VAL=0;//reset counter
+	SysTick->CTRL=0x00000005;//enable counter
+	while((SysTick->CTRL & 0x00010000) == 0)//check flag
+		{
+
+		}
+
+}
+unsigned char UART_InChar(void)
+{
+
+	while(UART0_S1 & (1u<<5))
+	{
+		return(UART0_D);
+	}
+}
+void UART_OutChar(unsigned char data)
+{
+	while(!(UART0_S1 & (1u<<7)));
+	UART0_D=data;
+}
+// iterative method
+void UART_OutUDec(unsigned long n)
+{
+	unsigned cnt=0;
+	unsigned char buffer[11];
+	do
+	{
+		buffer[cnt] = n%10;// digit
+		n = n/10;
+		cnt++;
+	}	while(n);// repeat until n==0
+	do
+	{
+		UART_OutChar(buffer[cnt-1]+'0');
+		cnt--;
+	}while(cnt != 0);
+}
+int main()
+{
+	green();
+	red();
+
+	redon();
+	redoff();
+	greenon();
+	greenoff();
+	UART_Init();
+	InitSYSTICK();
+	sw1();
+	sw2();
+
+    char msg[len]="udit kr agarwal";
+    while(1)
+    {
+    	if(sw2stat()==1)
+    		{greenon();redoff();}
+    	else
+    		{greenoff();redon();}
+    	if(sw1stat()==1)
+    	{
+    		for(int i=0;i<len;i++)
+    			UART_OutChar(msg[i]);
+    		//UART0_C2=UART0_C2|(1u<<0);
+    		while(sw1stat()==1);
+    	}
+
+    }
+
+	return 0;
+
+}
