@@ -1,0 +1,100 @@
+//code for using switches to toggle betwwen red and green led
+
+#include "MKL46Z4.H"
+void sw1(){
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTC_MASK;
+	PORTC_PCR3=1u<<8|1u<<1|1u<<0;
+	GPIOC_PDDR=GPIOC_PDDR&~(1u<<8);
+}
+void sw2(){
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTC_MASK;
+	PORTC_PCR12=1u<<8|1u<<1|1u<<0;
+	GPIOC_PDDR=GPIOC_PDDR&~(1u<<8);
+}
+void green()
+{
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTD_MASK;
+	PORTD_PCR5=1u<<8;
+	GPIOD_PDDR=1u<<5;
+	GPIOD_PSOR=1u<<5;
+}
+void red()
+{
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTE_MASK;
+	PORTE_PCR29=1u<<8;
+	GPIOE_PDDR=1u<<29;
+	GPIOE_PSOR=1u<<29;
+}
+void redon()
+{
+	GPIOE_PCOR=1u<<29;
+}
+void greenon()
+{
+	GPIOD_PCOR=(1u<<5);
+}
+void greenoff()
+{
+	GPIOD_PSOR=1u<<5;
+}
+void redoff()
+{
+	GPIOE_PSOR=1u<<29;
+}
+int getgreenstatus()
+{
+	if( GPIOD_PDIR==1u<<5)
+		return 1;
+	else
+		return 0;
+}
+int getredstatus()
+{
+	if( GPIOE_PDIR==1u<<29)
+		return 1;
+	else
+		return 0;
+}
+int main()
+{
+	int count=0;
+	sw1();
+    sw2();
+    red();
+	green();
+    redon();
+    redoff();
+	greenon();
+	greenoff();
+	while(1)
+	{
+for(int i=0;i<400000;i++);
+
+		if(GPIOC_PDIR==4096)
+		{
+
+			int a=getgreenstatus();
+			if(a==0)
+				greenoff();
+			else
+				if(a==1)
+					greenon();
+
+		}
+		if(GPIOC_PDIR==8)
+				{
+
+					int a=getredstatus();
+					if(a==0)
+						redoff();
+					else
+						if(a==1)
+							redon();
+
+				}
+
+
+	}
+	return 0;
+
+}
