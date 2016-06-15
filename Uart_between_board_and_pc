@@ -1,0 +1,98 @@
+//code for UART between frdm board and pc via Open Sda port
+#include "MKL46Z4.h"
+//UART0,PTA1=RX and PTA1=TX
+void UART_Init(void){
+	SIM_SOPT2=(1u<<26);//SIM_SOPT2_UART0SRC(1);Clock to UART0 MCGFLLCLK 20.97152MHz as MCG_C4=0x00 low range 20Mhz
+	//SIM_SOPT5=0x00;kar na kar
+	//open-drain mode disabled(Clear bit 16) plus
+	//connection to UART_TX and UART_RX(Module to module interconnect) Clear bit 2,1 and 0
+	SIM_SCGC4=SIM_SCGC4|(1u<<10);//set bit 10 for giving clock to UART0
+	SIM_SCGC5=SIM_SCGC5_PORTA_MASK;//set bit 9 for giving clock to PORTA
+	PORTA_PCR1=PORTA_PCR1&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA1 as UART1_RX (010  9 for alternative 2 which is UART0_RX)
+	PORTA_PCR2=PORTA_PCR1&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA2 as UART1_TX (010  9 for alternative 2 which is UART0_TX)
+	UART0_C2=0x00;//TX and RX both disabled
+    UART0_BDH=0x00;//0x02;//Baud rate =9600,20.97152Mhz clock
+    UART0_BDL=0x88;//BR=136//0x22;//BR=132.5=132=100111000
+    UART0_C1=0x00;
+    //UART0_S2=UART0_S1 & 0xC1;
+    UART0_C3=0x00;
+    UART0_C4=0x0F;//OSR=15//OSR=3
+    UART0_C5=0x00;//not both edges 0x02;//as OSR=4, sampling on both edges of baud rate clock of received data
+    UART0_C2=UART0_C2 | (1u<<3);//only TX enable
+    //UART0_C2=UART0_C2 | (1u<<2);//for RX pin to enable
+}
+void InitLEDG(void)
+{
+	SIM_SCGC5=SIM_SCGC5|SIM_SCGC5_PORTD_MASK;//Enable clock to PORTD
+	PORTD_PCR5=256;//declare pins as GPIO
+	GPIOD_PDDR=GPIOD_PDDR | 0x00000020;//set pin as output
+	GPIOD_PDOR=GPIOD_PDOR | 0x00000020;//LED initially off
+}
+void InitSYSTICK(void)
+{
+	//this is a 24 bit down counter
+	SysTick->CTRL=0;//disable timer
+	SysTick->LOAD=0x00FFFFFF;//load to full value 0x00FFFFFF
+	SysTick->VAL=0;//write anything to reset register
+	SysTick->CTRL=0x00000004;//1=bus clock, 0=disable interrupt, 0=disable systick
+}
+void delay(void)
+{
+	SysTick->VAL=0;//reset counter
+	SysTick->CTRL=0x00000005;//enable counter
+	while((SysTick->CTRL & 0x00010000) == 0)//check flag
+		{
+
+		}
+
+}
+unsigned char UART_InChar(void)
+{
+
+	while(UART0_S1 & (1u<<5))
+	{
+		return(UART0_D);
+	}
+}
+void UART_OutChar(unsigned char data)
+{
+	while(!(UART0_S1 & (1u<<7)));
+	UART0_D=data;
+}
+// iterative method
+void UART_OutUDec(unsigned long n)
+{
+	unsigned cnt=0;
+	unsigned char buffer[11];
+	do
+	{
+		buffer[cnt] = n%10;// digit
+		n = n/10;
+		cnt++;
+	}	while(n);// repeat until n==0
+	do
+	{
+		UART_OutChar(buffer[cnt-1]+'0');
+		cnt--;
+	}while(cnt != 0);
+}
+int main()
+{
+	UART_Init();
+	InitLEDG();
+	InitSYSTICK();
+	//unsigned long x=967;
+	char name=UART_InChar();
+name=(char)((int)name+1);
+		//UART_OutUDec(x);
+		for(int i=0;i<1;i++)
+		{
+			UART_OutChar(name);
+		}
+		GPIOD_PDOR= 0u<<5;
+		delay();
+		GPIOD_PDOR= 1u<<5;
+		delay();
+
+	return 0;
+}
