@@ -1,0 +1,60 @@
+//Basic code for switching green and red led on and off alternatively
+
+#include "MKL46Z4.h"
+void initred(void)
+{
+	SIM_SCGC5=SIM_SCGC5 | SIM_SCGC5_PORTE_MASK;
+	PORTE_PCR29=1u<<8;
+	GPIOE_PDDR=1u<<29;
+
+}
+void initgreen()
+{
+	SIM_SCGC5=SIM_SCGC5 | SIM_SCGC5_PORTD_MASK;
+    PORTD_PCR5=1u<<8;
+	GPIOD_PDDR=1u<<5;
+}
+void redon()
+{
+	GPIOE_PDOR=0u<<29;
+}
+void redoff()
+{
+	GPIOE_PDOR=1u<<29;
+}
+void greenon()
+{
+	GPIOD_PDOR=0u<<5;
+}void greenoff()
+{
+	GPIOD_PDOR=1u<<5;
+}
+int main()
+{
+initred();
+redoff();
+initgreen();
+greenoff();
+
+int i=2;
+while(1)
+{
+	if(i%2==0)
+	{
+		redon();
+         i=i+1;
+		for(int k=0;k<400000;k++);
+		redoff();
+
+	}
+	else
+	{
+		greenon();
+		for(int k=0;k<400000;k++);
+		greenoff();
+		i=i+1;
+	}
+
+}
+return 0;
+}
