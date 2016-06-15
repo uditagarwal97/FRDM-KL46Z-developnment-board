@@ -1,0 +1,39 @@
+//code for using PIT modules of the board
+
+#include "MKL46Z4.h"
+
+void InitLED(void)
+{
+	SIM_SCGC5= SIM_SCGC5 | SIM_SCGC5_PORTD_MASK;//enable
+	//clock to portd
+	PORTD_PCR5=256;// set pin5 of portd as gpio
+	GPIOD_PDDR=(1u<<5);//set pin 5 of portd as output//port data direction register
+	GPIOD_PSOR=(1u<<5);
+}
+void initpit()
+{
+	SIM_SCGC6 = SIM_SCGC6 | SIM_SCGC6_PIT_MASK;
+	PIT_MCR=PIT_MCR &~(1u<<1);
+	PIT_TFLG0=1;
+}
+int main()
+{
+	InitLED();
+	initpit();
+	while(1)
+	{
+		PIT_LDVAL0=48971520;
+		PIT_TCTRL0 |= (1u<<0);//START TIMER
+		if(PIT_TFLG0 & (1u<<0) ==1)
+		{
+			GPIOD_PTOR=1u<<5;
+			PIT_TFLG0|=1;
+			PIT_TCTRL0 |= (0u<<0);
+		}
+
+
+	}
+	return 0;
+}
+
+
