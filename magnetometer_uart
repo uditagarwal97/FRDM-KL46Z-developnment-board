@@ -1,0 +1,323 @@
+//code for using and sending Board's magnetometer data via Uart
+
+#include "MKL46Z4.h"
+
+#define MAG_CTRL_REG1 (0x10)
+#define MAG_CTRL_REG2 (0x11)
+
+void InitLEDR(void)
+{
+	SIM_SCGC5 = SIM_SCGC5 | SIM_SCGC5_PORTE_MASK; //clock to Port E for PTE29
+	PORTE_PCR29 = 256; //Alternate 1 - 001 for bits 10, 9, 8 respectively
+	GPIOE_PDDR = GPIOE_PDDR | (1u<<29);
+}
+/*
+void InitI2C(void)
+{
+	SIM_CLKDIV1 = SIM_CLKDIV1 | (1u<<17) | (1u<<16); //bus clock is 24/3 = 8MHz
+	SIM_SCGC5 = SIM_SCGC5 | SIM_SCGC5_PORTE_MASK; //clock to PTE24 and PTE25 for I2C0
+	SIM_SCGC4 = SIM_SCGC4 | SIM_SCGC4_I2C0_MASK; //clock to I2C0
+	PORTE_PCR24 = PORTE_PCR24 | (1u<<10) & ~(1u<<9) | (1u<<8); //alternative 5 - 101 for bits 10, 9 8 respectively
+	PORTE_PCR25 = PORTE_PCR25 | (1u<<10) & ~(1u<<9) | (1u<<8); //alternative 5 - 101 for bits 10, 9 8 respectively
+	I2C1_A1 = 0x02; //address when module acts as slave
+	I2C0_F = 0x80; //mult=2h ICR=00h
+	//I2C0_C1 = 0xB0; //10110000 - module enable, interrupt disable, master, transmit,
+	//acknowledge bit sent,repeated start off, wake up off, DMA off
+	//I2C0_C2 = 0x00;
+}
+
+*/
+//UART0,PTA1=RX and PTA1=TX
+void InitUART(void)
+{
+	SIM_SOPT2=(1u<<26);//SIM_SOPT2_UART0SRC(1);Clock to UART0 MCGFLLCLK 20.97152MHz as MCG_C4=0x00 low range 20Mhz
+	//SIM_SOPT5=0x00;kar na kar
+	//open-drain mode disabled(Clear bit 16) plus
+	//connection to UART_TX and UART_RX(Module to module interconnect) Clear bit 2,1 and 0
+	SIM_SCGC4=SIM_SCGC4|(1u<<10);//set bit 10 for giving clock to UART0
+	SIM_SCGC5=SIM_SCGC5_PORTA_MASK;//set bit 9 for giving clock to PORTA
+	PORTA_PCR1=PORTA_PCR1&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA1 as UART1_RX (010  9 for alternative 2 which is UART0_RX)
+	PORTA_PCR2=PORTA_PCR2&~(1u<<10)|(1u<<9)&~(1u<<8);//PTA2 as UART1_RX (010  9 for alternative 2 which is UART0_TX)
+	UART0_C2=0x00;//TX and RX both disabled
+    UART0_BDH=0x00;//0x02;//Baud rate =9600,20.97152Mhz clock
+    UART0_BDL=0x88;//BR=136//0x22;//BR=132.5=132=100111000
+    UART0_C1=0x00;
+    //UART0_S2=UART0_S1 & 0xC1;
+    UART0_C3=0x00;
+    UART0_C4=0x0F;//OSR=15//OSR=3
+    UART0_C5=0x00;//not both edges 0x02;//as OSR=4, sampling on both edges of baud rate clock of received data
+    UART0_C2=UART0_C2 | (1u<<3);//only TX enable
+}
+
+void UART_OutChar(unsigned char data)
+{
+	while(!(UART0_S1 & (1u<<7)));
+	UART0_D=data;
+}
+void UART_OutUDec(unsigned int n)
+{
+	unsigned cnt=0;
+	unsigned char buffer[50];
+	do
+	{
+		buffer[cnt] = n%10;// digit
+		n = n/10;
+		cnt++;
+	}	while(n);// repeat until n==0
+	do
+	{
+		UART_OutChar(buffer[cnt-1]+'0');
+		cnt--;
+	}while(cnt != 0);
+}
+
+void i2c_set_tx_mode(I2C_MemMapPtr p)
+{
+    p->C1 |= I2C_C1_TX_MASK;
+}
+void i2c_set_rx_mode(I2C_MemMapPtr p)
+{
+    p->C1 &= ~I2C_C1_TX_MASK;
+}
+
+void i2c_set_slave_mode(I2C_MemMapPtr p)
+{
+    p->C1  &= ~I2C_C1_MST_MASK;
+}
+void i2c_set_master_mode(I2C_MemMapPtr p)
+{
+    p->C1  |=  I2C_C1_MST_MASK;
+}
+
+// i2c general
+
+void i2c_give_nack(I2C_MemMapPtr p)
+{
+    p->C1 |= I2C_C1_TXAK_MASK;
+}
+void i2c_give_ack(I2C_MemMapPtr p)
+{
+    p->C1 &= ~I2C_C1_TXAK_MASK;
+}
+void i2c_repeated_start(I2C_MemMapPtr p)
+{
+    p->C1 |= 0x04;
+}
+void i2c_write_byte(I2C_MemMapPtr p, uint8_t data)
+{
+    p->D = data;
+}
+uint8_t i2c_read_byte(I2C_MemMapPtr p)
+{
+    return p->D;
+}
+void i2c_start(I2C_MemMapPtr p)
+{
+    i2c_set_master_mode(p);
+    i2c_set_tx_mode(p);
+}
+void i2c_stop(I2C_MemMapPtr p)
+{
+    i2c_set_slave_mode(p);
+    i2c_set_rx_mode(p);
+}
+void i2c_wait(I2C_MemMapPtr p)
+{
+    // wait flag
+    while((p->S & I2C_S_IICIF_MASK)==0);
+    // clear flag
+    p->S |= I2C_S_IICIF_MASK;
+}
+uint16_t i2c_get_ack(I2C_MemMapPtr p)
+{
+//	while((p->S & I2C_S_RXAK_MASK) != 0);
+    if((p->S & I2C_S_RXAK_MASK) == 0)
+        return 1; //true=1
+    else
+        return 0;//false=0
+}
+
+void i2c0_init(I2C_MemMapPtr p)   //Magnetometro
+{
+    //SIM_SCGC4 |= SIM_SCGC4_I2C1_MASK;
+
+	SIM_SCGC4 |= SIM_SCGC4_I2C0_MASK;
+	SIM_SCGC5 |= SIM_SCGC5_PORTE_MASK;
+
+    // configure GPIO for I2C function
+    PORTE_PCR24 = PORT_PCR_MUX(5);
+    PORTE_PCR25 = PORT_PCR_MUX(5);
+
+    //PORTC_PCR10 = PORT_PCR_MUX(2);
+    //PORTC_PCR11 = PORT_PCR_MUX(2);
+
+
+    p->F  = 0x1F; // baudrate
+    p->C1 = 0x80; // enable IIC
+}
+
+static void pause(void)
+{
+    int n;
+    for(n=0; n<100; n++)
+        __asm("nop");
+//    for(n=0; n<100; n++);
+}
+uint8_t hal_dev_mag3110_read_reg(uint8_t addr)
+{
+    uint8_t result=0;
+
+    i2c_start(I2C0);
+    i2c_write_byte(I2C0, (0x0E<<1));
+
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_write_byte(I2C0, addr);
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_repeated_start(I2C0);
+    i2c_write_byte(I2C0, (0x0E<<1)|1);
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_set_rx_mode(I2C0);
+
+    i2c_give_nack(I2C0);
+    result = i2c_read_byte(I2C0);
+    i2c_wait(I2C0);
+
+    i2c_stop(I2C0);
+    result = i2c_read_byte(I2C0);
+    pause();
+    return result;
+}
+
+void hal_dev_mag3110_write_reg(uint8_t addr, uint8_t data)
+{
+    i2c_start(I2C0);
+
+    i2c_write_byte(I2C0, (0x0E<<1));
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_write_byte(I2C0, addr);
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_write_byte(I2C0, data);
+    i2c_wait(I2C0);
+    i2c_get_ack(I2C0);
+
+    i2c_stop(I2C0);
+    pause();
+}
+
+//unsigned int mag_x, mag_y, mag_z;
+
+uint16_t Mresultx, Mresulty, Mresultz;
+
+void mag_init(void)
+{
+ //   hal_dev_mag3110_init();      //Initialize I2C modules done in read/write functions itself
+    hal_dev_mag3110_write_reg(MAG_CTRL_REG1,0x00); //Standby mode
+    hal_dev_mag3110_write_reg(MAG_CTRL_REG2,0x80); //Auto reset
+    hal_dev_mag3110_write_reg(MAG_CTRL_REG1,0x01); //Active
+}
+
+void mag_read(uint8_t buffer[])
+{
+    if((hal_dev_mag3110_read_reg(0x00)&0xf) != 0)
+    {
+
+      buffer[0] = hal_dev_mag3110_read_reg(0x01);
+      buffer[1] = hal_dev_mag3110_read_reg(0x02);
+
+      buffer[2] = hal_dev_mag3110_read_reg(0x03);
+      buffer[3] = hal_dev_mag3110_read_reg(0x04);
+
+      buffer[4] = hal_dev_mag3110_read_reg(0x05);
+      buffer[5] = hal_dev_mag3110_read_reg(0x06);
+
+      Mresultx  = buffer[0]<<8;
+      Mresultx |= buffer[1];
+
+      Mresulty  = buffer[2]<<8;
+      Mresulty |= buffer[3];
+
+      Mresultz  = buffer[4]<<8;
+      Mresultz |= buffer[5];
+
+
+//      Mresultx   = hal_dev_mag3110_read_reg(0x01)<<8;
+//      Mresultx  |= hal_dev_mag3110_read_reg(0x02);
+
+//      Mresulty   = hal_dev_mag3110_read_reg(0x03)<<8;
+//      Mresulty  |= hal_dev_mag3110_read_reg(0x04);
+
+//      Mresultz   = hal_dev_mag3110_read_reg(0x05)<<8;
+//      Mresultz  |= hal_dev_mag3110_read_reg(0x06);
+    }
+}
+
+
+int main(void)
+{
+	//InitI2C();
+//	SIM_CLKDIV1 = SIM_CLKDIV1 | (1u<<18) & ~(1u<<17) | (1u<<16); //bus clock is 48/6 = 8MHz //default is 48/2=24MHz
+	char name[6] = "Values";
+	InitUART();
+	InitLEDR();
+	i2c0_init(I2C0);
+	int i;
+	mag_init();
+	uint8_t mag_data[6];
+    while(1)
+    {
+    	i=10000;
+    	mag_read(mag_data);
+    	/*
+    	UART_OutUDec(mag_data[0]);
+    	UART_OutChar('\n');
+    	UART_OutChar('\r');
+    	UART_OutUDec(mag_data[1]);
+    	UART_OutChar('\n');
+    	UART_OutChar('\r');
+    	UART_OutUDec(mag_data[2]);
+    	UART_OutChar('\n');
+    	UART_OutChar('\r');
+    	UART_OutUDec(mag_data[3]);
+       	UART_OutChar('\n');
+       	UART_OutChar('\r');
+    	UART_OutUDec(mag_data[4]);
+    	UART_OutChar('\n');
+    	UART_OutChar('\r');
+    	UART_OutUDec(mag_data[5]);
+    	UART_OutChar('\n');
+      	UART_OutChar('\r');
+      	*/
+		//for(int j=0;j<6;j++)
+		//{
+		//	UART_OutChar(name[j]);
+		//}
+    	//UART_OutChar('\n');
+      //	UART_OutChar('\r');
+    	UART_OutUDec(Mresultx);
+    	//UART_OutChar(' ');
+      	UART_OutChar('\r');
+    	UART_OutUDec(Mresulty);
+    	//UART_OutChar(' ');
+      	UART_OutChar('\r');
+    	UART_OutUDec(Mresultz);
+    	//UART_OutChar(' ');
+      	UART_OutChar('\r');
+for(int i=0;i<86000;i++);
+    	GPIOE_PTOR = GPIOE_PTOR | (1u<<29);
+    	while(i>0)
+    	{
+    		i--;
+    	}
+    }
+    return 0;
+}
